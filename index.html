@@ -11,7 +11,12 @@
   <aside id="sidebar">
     <div class="side-head">
       <button id="btn-new">+ 新对话</button>
+      <button id="btn-tpl" title="群聊模板">模板</button>
+      <button id="btn-clear" title="清空全部会话">清空</button>
       <button id="btn-settings" title="设置">⚙</button>
+    </div>
+    <div class="side-search">
+      <input id="sess-search" placeholder="搜索会话…">
     </div>
     <div id="sessions"></div>
   </aside>
@@ -62,7 +67,9 @@
       <div class="stat">
         <div><span>本次会话花费</span><b id="stat-cost">¥0.0000</b></div>
         <div><span>请求数</span><b id="stat-req">0</b></div>
+        <div><span>上下文估算</span><b id="stat-ctx">0</b></div>
       </div>
+      <div class="hint">花费按公开单价粗估，不是真实账单；上下文按字数 ÷ 2.2 估算，接近模型上限会被静默截断。</div>
     </div>
   </aside>
 </div>

@@ -8,16 +8,16 @@ const LS_KEY = 'ac.app.v2';
 
 // 常见 provider 预设（baseUrl 不含 /chat/completions）
 const PRESETS = {
-  deepseek:  { name: 'DeepSeek',   type: 'openai',    baseUrl: 'https://api.deepseek.com/v1',                          models: ['deepseek-chat', 'deepseek-reasoner'], effort: ['low','medium','high'] },
-  qwen:      { name: '通义千问',    type: 'openai',    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',   models: ['qwen3.8-max', 'qwen3.8-flash'], effort: [] },
-  kimi:      { name: 'Kimi',       type: 'openai',    baseUrl: 'https://api.moonshot.cn/v1',                          models: ['kimi-k3.1-pro', 'kimi-k2.6'], effort: [] },
-  glm:       { name: 'GLM',        type: 'openai',    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',                models: ['glm-5.3', 'glm-4.7', 'glm-5.3-flash'], effort: ['low','medium','high'] },
-  openai:    { name: 'OpenAI',     type: 'openai',    baseUrl: 'https://api.openai.com/v1',                           models: ['gpt-4.1', 'gpt-4.1-mini', 'o4-mini'], effort: ['low','medium','high'] },
-  anthropic: { name: 'Claude',     type: 'anthropic', baseUrl: 'https://api.anthropic.com',                           models: ['claude-sonnet-4-5', 'claude-haiku-4-5'], effort: [] },
-  gemini:    { name: 'Gemini',     type: 'openai',    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], effort: [] },
-  openrouter:{ name: 'OpenRouter', type: 'openai',    baseUrl: 'https://openrouter.ai/api/v1',                        models: ['deepseek/deepseek-chat'], effort: [] },
-  groq:      { name: 'Groq',       type: 'openai',    baseUrl: 'https://api.groq.com/openai/v1',                      models: ['llama-3.3-70b-versatile'], effort: [] },
-  custom:    { name: '自定义',      type: 'openai',    baseUrl: 'https://',                                            models: [], effort: [] },
+  deepseek:  { name: 'DeepSeek',   emoji: '🐳', color: '#1f6feb', type: 'openai',    baseUrl: 'https://api.deepseek.com/v1',                          models: ['deepseek-chat', 'deepseek-reasoner'], effort: ['low','medium','high'] },
+  qwen:      { name: '通义千问',    emoji: '🅠', color: '#6b4ce6', type: 'openai',    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',   models: ['qwen3.8-max', 'qwen3.8-flash'], effort: [] },
+  kimi:      { name: 'Kimi',       emoji: '🌙', color: '#2b3a67', type: 'openai',    baseUrl: 'https://api.moonshot.cn/v1',                          models: ['kimi-k3.1-pro', 'kimi-k2.6'], effort: [] },
+  glm:       { name: 'GLM',        emoji: '✨', color: '#7a5cff', type: 'openai',    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',                models: ['glm-5.3', 'glm-4.7', 'glm-5.3-flash'], effort: ['low','medium','high'] },
+  openai:    { name: 'OpenAI',     emoji: '⬤', color: '#10a37f', type: 'openai',    baseUrl: 'https://api.openai.com/v1',                           models: ['gpt-4.1', 'gpt-4.1-mini', 'o4-mini'], effort: ['low','medium','high'] },
+  anthropic: { name: 'Claude',     emoji: '🧠', color: '#c96442', type: 'anthropic', baseUrl: 'https://api.anthropic.com',                           models: ['claude-sonnet-4-5', 'claude-haiku-4-5'], effort: [] },
+  gemini:    { name: 'Gemini',     emoji: '✦', color: '#4285f4', type: 'openai',    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], effort: [] },
+  openrouter:{ name: 'OpenRouter', emoji: '🔀', color: '#5a5a5a', type: 'openai',    baseUrl: 'https://openrouter.ai/api/v1',                        models: ['deepseek/deepseek-chat'], effort: [] },
+  groq:      { name: 'Groq',       emoji: '⚡', color: '#f55036', type: 'openai',    baseUrl: 'https://api.groq.com/openai/v1',                      models: ['llama-3.3-70b-versatile'], effort: [] },
+  custom:    { name: '自定义',      emoji: '◆', color: '#6b7280', type: 'openai',    baseUrl: 'https://',                                            models: [], effort: [] },
 };
 
 // 粗估价格（¥ / 百万 token），仅供显示，不参与计费
@@ -39,6 +39,8 @@ function defaultState() {
     activeId: null,
     lastModelKey: null,
     plugins: [],
+    templates: [],           // 群聊模板 {id,name,members:[key],hostKey}
+    provStatus: {},          // {providerId: {ok:boolean, at:number, msg:string}}
     params: { effort: 2, temp: 0.7, maxTokens: 2000, rounds: 'auto' },
     pricing: { ...PRICE },
   };
@@ -46,8 +48,10 @@ function defaultState() {
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const st = Object.assign(defaultState(), JSON.parse(raw)); st.plugins = st.plugins || []; return st; }
-  } catch (e) { console.warn('读本地数据失败', e); }
+    if (raw) { const st = Object.assign(defaultState(), JSON.parse(raw)); st.plugins = st.plugins || []; st.templates = st.templates || []; st.provStatus = st.provStatus || {}; return st; }
+  } catch (e) {
+    console.warn('读本地数据失败', e);
+  }
   return defaultState();
 }
 function save() { localStorage.setItem(LS_KEY, JSON.stringify(S)); }
@@ -104,12 +108,18 @@ function render() {
   renderPanel(s);
   $('#stat-cost').textContent = '¥' + (s ? s.cost : 0).toFixed(4);
   $('#stat-req').textContent = s ? s.reqs : 0;
+  const ctxTok = s ? s.messages.reduce((n, m) => n + estimateTokens(m.content || ''), 0) : 0;
+  $('#stat-ctx').textContent = ctxTok > 1000 ? (ctxTok / 1000).toFixed(1) + 'K tok' : ctxTok + ' tok';
+  $('#stat-ctx').style.color = ctxTok > 90000 ? 'var(--err)' : '';
 }
 
 function renderSessions() {
   const box = $('#sessions');
   box.innerHTML = '';
-  for (const s of S.sessions) {
+  const q = (($('#sess-search') || {}).value || '').trim().toLowerCase();
+  const list = q ? S.sessions.filter((s) => matchesQuery(s, q)) : S.sessions;
+  if (q && !list.length) box.innerHTML = '<p class="hint" style="padding:8px">没有匹配的会话</p>';
+  for (const s of list) {
     const d = document.createElement('div');
     d.className = 'sess' + (s.id === S.activeId ? ' on' : '');
     const tag = document.createElement('span');
@@ -119,8 +129,14 @@ function renderSessions() {
     t.textContent = s.title;
     t.style.flex = '1';
     t.style.overflow = 'hidden'; t.style.textOverflow = 'ellipsis';
+    t.title = '双击改名';
+    const ren = document.createElement('button');
+    ren.className = 'sess-btn';
+    ren.textContent = '✎';
+    ren.title = '改名';
+    ren.onclick = (e) => { e.stopPropagation(); renameSession(s); };
     const del = document.createElement('button');
-    del.className = 'sess-del';
+    del.className = 'sess-btn del';
     del.textContent = '×';
     del.title = '删除这个会话';
     del.onclick = (e) => {
@@ -131,10 +147,110 @@ function renderSessions() {
       if (S.activeId === s.id) S.activeId = S.sessions[0]?.id || null;
       save(); render();
     };
-    d.append(tag, t, del);
+    d.append(tag, t, ren, del);
     d.onclick = () => { S.activeId = s.id; save(); render(); };
+    d.ondblclick = (e) => { e.stopPropagation(); renameSession(s); };
     box.append(d);
   }
+}
+
+// 搜索：标题或任意消息内容命中
+function matchesQuery(s, q) {
+  if ((s.title || '').toLowerCase().includes(q)) return true;
+  return (s.messages || []).some((m) => (m.content || '').toLowerCase().includes(q));
+}
+
+
+// ── 群聊模板 ─────────────────────────────────────────────────
+function saveTemplate() {
+  const s = active();
+  if (!s || !s.members.length) { alert('先建一个群聊、把成员加好，再来存模板。'); return; }
+  const name = prompt('给这个群聊组合起个名字', (s.title || '群聊') + '组合');
+  if (name === null) return;
+  const v = name.trim();
+  if (!v) return;
+  S.templates = S.templates || [];
+  S.templates.unshift({ id: uid(), name: v.slice(0, 40), members: s.members.map((m) => ({ ...m })), hostKey: s.hostKey || null });
+  save();
+  toast('存好了：' + v);
+  openTemplates();
+}
+
+function applyTemplate(t) {
+  const s = newSession('group');
+  s.members = t.members.map((m) => ({ ...m }));
+  s.hostKey = t.hostKey || null;
+  s.title = t.name;
+  save();
+  closeModal();
+  render();
+  toast('开好了：' + t.name);
+}
+
+function openTemplates() {
+  const s = active();
+  let box = document.querySelector('#modal .tpl-list');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!S.templates.length) {
+    box.innerHTML = '<p class="hint">还没有模板。把当前群聊的成员配好，点下面的「存当前群聊」。</p>';
+  }
+  for (const t of S.templates) {
+    const row = document.createElement('div');
+    row.className = 'tpl-row';
+    const name = document.createElement('b');
+    name.textContent = t.name;
+    const who = document.createElement('span');
+    who.className = 'hint';
+    who.textContent = t.members.map((m) => labelOf(m.key)).join('、');
+    const use = document.createElement('button');
+    use.textContent = '用这个';
+    use.onclick = () => applyTemplate(t);
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.textContent = '删';
+    del.onclick = () => {
+      if (!confirm('删掉模板「' + t.name + '」？')) return;
+      S.templates = S.templates.filter((x) => x.id !== t.id);
+      save(); openTemplates();
+    };
+    row.append(name, who, use, del);
+    box.append(row);
+  }
+}
+
+function openTemplateModal() {
+  openModal('群聊模板', `
+    <p class="hint">存一套成员和群主，下次一键开同样的群聊。</p>
+    <div class="tpl-list"></div>
+    <div class="row" style="margin-top:12px">
+      <button id="btn-tpl-save">存当前群聊</button>
+      <button id="btn-tpl-new">新建群聊</button>
+    </div>`);
+  document.querySelector('#btn-tpl-save').onclick = saveTemplate;
+  document.querySelector('#btn-tpl-new').onclick = () => { closeModal(); newSession('group'); render(); };
+  openTemplates();
+}
+
+// ── 提供商连通状态 ───────────────────────────────────────────
+function statusDot(pid) {
+  const st = (S.provStatus || {})[pid];
+  if (!st) return '○';
+  return st.ok ? '●' : '✕';
+}
+function statusTitle(pid) {
+  const st = (S.provStatus || {})[pid];
+  if (!st) return '还没测过连通性';
+  return (st.ok ? '上次测通了' : '上次没测通') + '（' + new Date(st.at).toLocaleString() + '）' + (st.msg ? '：' + st.msg : '');
+}
+
+function renameSession(s) {
+  const name = prompt('给这个会话起个名字', s.title);
+  if (name === null) return;
+  const v = name.trim();
+  if (!v) return;
+  s.title = v.slice(0, 60);
+  save(); render();
 }
 
 function welcomeCard(s) {
@@ -197,12 +313,90 @@ function renderChat(s) {
   box.scrollTop = box.scrollHeight;
 }
 
+
+// ── 头像：优先用自己上传的图，否则用预设 emoji + 品牌色 ──────────
+const MODEL_EMOJI = [
+  [/deepseek/i, '🐳'], [/qwen|通义/i, '🅠'], [/kimi|moonshot/i, '🌙'],
+  [/glm|智谱|chatglm/i, '✨'], [/gpt|openai/i, '⬤'], [/claude|anthropic/i, '🧠'],
+  [/gemini/i, '✦'], [/llama|groq/i, '⚡'], [/openrouter/i, '🔀'],
+];
+
+function providerOfMessage(m) {
+  if (m.pid) {
+    const p = providerById(m.pid);
+    if (p) return p;
+  }
+  // 老消息没有 pid：按模型名反查
+  const model = String(m.model || '');
+  if (model) {
+    const hit = S.providers.find((p) => (p.models || []).some((x) => x === model || model.endsWith('/' + x)));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function avatarSpec(m) {
+  if (m.role === 'user') return { emoji: '🙂', color: '#3a4250', name: '我' };
+  const p = providerOfMessage(m);
+  if (p) return { img: p.avatar || '', emoji: p.emoji || guessEmoji(p.name), color: p.color || '#39414d', name: p.name };
+  return { emoji: guessEmoji(m.model || m.who), color: '#39414d', name: m.who || '' };
+}
+
+function guessEmoji(text) {
+  const s = String(text || '');
+  for (const [re, emo] of MODEL_EMOJI) if (re.test(s)) return emo;
+  return '◆';
+}
+
+function avatarEl(m) {
+  const spec = avatarSpec(m);
+  const el = document.createElement('div');
+  el.className = 'ava';
+  el.style.background = spec.color;
+  el.title = spec.name || '';
+  if (spec.img) {
+    const img = document.createElement('img');
+    img.src = spec.img;
+    img.alt = spec.name || '';
+    el.append(img);
+  } else {
+    el.textContent = spec.emoji;
+  }
+  return el;
+}
+
+// 把用户选的图压成 128×128 的 jpeg，省 localStorage
+function shrinkImage(file, size = 128) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读不了这个文件'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('这不是能显示的图片'));
+      img.onload = () => {
+        const cv = document.createElement('canvas');
+        cv.width = size; cv.height = size;
+        const ctx = cv.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        resolve(cv.toDataURL('image/jpeg', 0.86));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function renderMsg(m, s) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (m.role === 'user' ? 'user' : '') + (m.err ? ' err' : '');
   const who = document.createElement('div');
   who.className = 'who';
-  who.textContent = m.who || (m.role === 'user' ? '我' : 'AI');
+  const nameEl = document.createElement('div');
+  nameEl.className = 'who-name';
+  nameEl.textContent = m.who || (m.role === 'user' ? '我' : 'AI');
+  who.append(avatarEl(m), nameEl);
   const body = document.createElement('div');
   body.className = 'body';
 
@@ -375,6 +569,7 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
         system: '你是与会者之一。直接给答案，不要客套。',
         messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
       }),
+      signal: currentAC ? currentAC.signal : undefined,
     });
     if (!r.ok) throw new Error(await httpErr(r));
     return await readSSE(r, (obj) => {
@@ -398,6 +593,7 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.apiKey },
     body: JSON.stringify(body),
+    signal: currentAC ? currentAC.signal : undefined,
   });
   if (!r.ok && r.status === 400 && body.stream_options) {
     // 有的国产接口不认 stream_options，去掉再来一次
@@ -406,6 +602,7 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.apiKey },
       body: JSON.stringify(body),
+      signal: currentAC ? currentAC.signal : undefined,
     });
     if (!r2.ok) throw new Error(await httpErr(r2));
     return finishStream(r2);
@@ -466,11 +663,24 @@ async function readSSE(resp, pick, t0, model, onUsage) {
 
 // ── 发送 ─────────────────────────────────────────────────────
 let busy = false;
+let currentAC = null;      // 当前请求的 AbortController，用来"停止生成"
+
+function setSendButton(running) {
+  const b = $('#btn-send');
+  if (!b) return;
+  b.textContent = running ? '停止' : '发送';
+  b.classList.toggle('stop', running);
+}
+
+function stopRun() {
+  if (currentAC) { try { currentAC.abort(); } catch (e) {} }
+}
 
 async function send() {
+  if (busy) { stopRun(); return; }          // 生成中再点就是"停止"
   const input = $('#input');
   const text = input.value.trim();
-  if (!text || busy) return;
+  if (!text) return;
   input.value = '';
   input.style.height = 'auto';
   await dispatch(text);
@@ -488,14 +698,19 @@ async function dispatch(text) {
 }
 
 async function runPart(s, text) {
-  busy = true; $('#btn-send').disabled = true;
+  busy = true; setSendButton(true);
+  currentAC = new AbortController();
   try {
     if (s.mode === 'single') await runSingle(s, text);
     else await runGroup(s, text);
   } catch (e) {
-    s.messages.push({ id: uid(), role: 'assistant', who: '系统', content: '出错了：' + e.message, err: true });
+    if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || '')))) {
+      toast('已停止');
+    } else {
+      s.messages.push({ id: uid(), role: 'assistant', who: '系统', content: '出错了：' + e.message, err: true });
+    }
   } finally {
-    busy = false; $('#btn-send').disabled = false;
+    busy = false; currentAC = null; setSendButton(false);
     save(); render();
   }
 }
@@ -550,7 +765,7 @@ async function runSingle(s, text) {
   if (!key) throw new Error('没有可用模型');
   const [providerId, model] = key.split('::');
   const p = providerById(providerId);
-  const holder = { id: uid(), role: 'assistant', who: p?.name || model, model, content: '', ms: 0, cost: 0 };
+  const holder = { id: uid(), role: 'assistant', pid: providerId, who: p?.name || model, model, content: '', ms: 0, cost: 0 };
   s.messages.push(holder);
   const nodes = renderChat(s);
   const el = $('#chat');
@@ -573,7 +788,11 @@ function appendLive(el, holder) {
   const wrap = document.createElement('div');
   wrap.className = 'msg';
   wrap.innerHTML = `<div class="who"></div><div class="body"><div class="meta"></div><div class="content"></div></div>`;
-  wrap.querySelector('.who').textContent = holder.who;
+  const whoBox = wrap.querySelector('.who');
+  const nm = document.createElement('div');
+  nm.className = 'who-name';
+  nm.textContent = holder.who;
+  whoBox.append(avatarEl(holder), nm);
   wrap.querySelector('.meta').textContent = [holder.model, '思考中…'].filter(Boolean).join(' · ');
   el.append(wrap);
   el.scrollTop = el.scrollHeight;
@@ -594,7 +813,7 @@ async function runGroup(s, question) {
   for (const m of members) {
     const [providerId, model] = m.key.split('::');
     const p = providerById(providerId);
-    const holder = { id: uid(), role: 'assistant', who: p?.name || model, model, content: '', round: 1, cost: 0, ms: 0 };
+    const holder = { id: uid(), role: 'assistant', pid: providerId, who: p?.name || model, model, content: '', round: 1, cost: 0, ms: 0 };
     s.messages.push(holder);
     const el = $('#chat');
     const live = appendLive(el, holder);
@@ -634,7 +853,7 @@ async function runGroup(s, question) {
     for (const m of members) {
       const [providerId, model] = m.key.split('::');
       const p = providerById(providerId);
-      const holder = { id: uid(), role: 'assistant', who: p?.name || model, model, content: '', round: 2, cost: 0, ms: 0 };
+      const holder = { id: uid(), role: 'assistant', pid: providerId, who: p?.name || model, model, content: '', round: 2, cost: 0, ms: 0 };
       s.messages.push(holder);
       const el = $('#chat');
       const live = appendLive(el, holder);
@@ -660,7 +879,7 @@ async function runGroup(s, question) {
   const transcript = all.map((m) => `【${m.who} / ${m.model} · 第${m.round}轮】\n${m.content}`).join('\n\n');
   const [hp, hm] = hostKey.split('::');
   const hpObj = providerById(hp);
-  const hostHolder = { id: uid(), role: 'assistant', who: (hpObj?.name || hm) + '（群主）', model: hm, content: '', isHost: true, cost: 0, ms: 0 };
+  const hostHolder = { id: uid(), role: 'assistant', pid: hp, who: (hpObj?.name || hm) + '（群主）', model: hm, content: '', isHost: true, cost: 0, ms: 0 };
   s.messages.push(hostHolder);
   const el = $('#chat');
   const live = appendLive(el, hostHolder);
@@ -706,12 +925,14 @@ function openSettings() {
         ${Object.entries(PRESETS).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}
       </select>
       <button class="btn" id="btn-add-prov">加一个</button>
+      <button class="btn ghost" id="btn-bulk-ava" title="一次选多张图，按文件名自动对应；对不上的会问你">批量导入头像</button>
     </div>
     <p class="hint" style="margin-top:14px">
       密钥只存在这台电脑的浏览器里（localStorage），不会上传。别在公共电脑上用，别把这个页面挂到公网上。
     </p>`;
   openModal('模型提供商', html, () => {
     renderProviders();
+    $('#btn-bulk-ava').onclick = importAvatars;
     $('#btn-add-prov').onclick = () => {
       const k = $('#preset-sel').value;
       const p = PRESETS[k];
@@ -739,17 +960,24 @@ function renderProviders() {
     d.className = 'prov';
     d.innerHTML = `
       <div class="row">
+        <span class="pstat"></span>
         <input class="name" value="${esc(p.name)}" placeholder="名字">
         <select>
           <option value="openai" ${p.type === 'openai' ? 'selected' : ''}>OpenAI 兼容</option>
           <option value="anthropic" ${p.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
         </select>
+        <button class="ava-btn">头像</button>
+        <button class="test">测试</button>
         <button class="del">删除</button>
       </div>
       <div class="row"><input value="${esc(p.baseUrl)}" placeholder="接口地址 https://..."></div>
       <div class="row"><input type="password" value="${esc(p.apiKey)}" placeholder="API 密钥"></div>
       <div class="row"><input value="${esc(p.models.join(','))}" placeholder="模型名，逗号分隔"></div>
       <div class="models"></div>`;
+    const stat = d.querySelector('.pstat');
+    stat.textContent = statusDot(p.id);
+    stat.title = statusTitle(p.id);
+    stat.className = 'pstat ' + ((S.provStatus || {})[p.id] ? (S.provStatus[p.id].ok ? 'ok' : 'bad') : 'na');
     const [nameIn, typeSel] = d.querySelectorAll('.row')[0].querySelectorAll('input,select');
     const baseIn = d.querySelectorAll('.row')[1].querySelector('input');
     const keyIn = d.querySelectorAll('.row')[2].querySelector('input');
@@ -764,8 +992,141 @@ function renderProviders() {
       S.providers.splice(i, 1);
       save(); renderProviders();
     };
+    d.querySelector('.test').onclick = (e) => testProvider(p, e.target);
+    d.querySelector('.ava-btn').onclick = () => pickAvatar(p);
     box.append(d);
   });
+}
+
+
+
+// 一次选多张图：文件名里带 deepseek / qwen / kimi / glm / gpt / claude / gemini 就自动对应，
+// 对不上的弹框问你要给谁，留空跳过。
+const AVA_ALIAS = {
+  deepseek: ['deepseek', '鲸', 'whale'],
+  qwen: ['qwen', 'tongyi', '千问', '通义'],
+  kimi: ['kimi', 'moonshot', '月之暗面'],
+  glm: ['glm', 'zhipu', '智谱', 'chatglm'],
+  openai: ['openai', 'gpt', 'chatgpt'],
+  anthropic: ['claude', 'anthropic'],
+  gemini: ['gemini', '谷歌', 'bard'],
+  groq: ['groq', 'llama'],
+  openrouter: ['openrouter'],
+};
+
+function matchProviderByFile(p, fileName) {
+  const n = String(fileName || '').toLowerCase();
+  const names = [String(p.name || ''), String(p.id || '')].map((x) => x.toLowerCase()).filter(Boolean);
+  if (names.some((x) => x && n.includes(x))) return true;
+  for (const [key, words] of Object.entries(AVA_ALIAS)) {
+    if (!names.includes(key) && !names.some((x) => x.includes(key))) continue;
+    if (words.some((w) => n.includes(w))) return true;
+  }
+  return false;
+}
+
+function importAvatars() {
+  if (!S.providers.length) { alert('先在下面加一个模型提供商'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.multiple = true;
+  inp.onchange = async () => {
+    const files = [...(inp.files || [])];
+    if (!files.length) return;
+    let done = 0;
+    for (const file of files) {
+      let p = S.providers.find((x) => matchProviderByFile(x, file.name));
+      if (!p) {
+        const menu = S.providers.map((x, i) => (i + 1) + '. ' + x.name).join('\n');
+        const ans = prompt('「' + file.name + '」给哪个模型？输序号，留空跳过\n\n' + menu, '');
+        if (!ans) continue;
+        p = S.providers[Number(ans) - 1];
+        if (!p) continue;
+      }
+      try {
+        p.avatar = await shrinkImage(file, 160);
+        done += 1;
+      } catch (e) {
+        console.warn('这张用不了', file.name, e);
+      }
+    }
+    save(); renderProviders(); render();
+    toast(done ? ('导入了 ' + done + ' 张头像') : '一张都没导入');
+  };
+  inp.click();
+}
+
+// 选一张图当这个提供商的脸；再点一次可以换，右键菜单式的"清除"放在提示里
+function pickAvatar(p) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    try {
+      const dataUrl = await shrinkImage(file);
+      p.avatar = dataUrl;
+      save(); renderProviders(); render();
+      toast('头像已更新：' + p.name + '（想换就再点一次「头像」，想恢复 emoji 就点「清除头像」）');
+    } catch (e) {
+      alert('这张图用不了：' + e.message);
+    }
+  };
+  inp.click();
+  if (p.avatar) {
+    // 已经有图时，给出清除入口，不打断当前选择
+    setTimeout(() => {
+      if (confirm('「' + p.name + '」已有头像。要清除这张图、改回 emoji 吗？\n\n点「确定」清除；点「取消」继续换图。')) {
+        delete p.avatar;
+        save(); renderProviders(); render();
+        toast('已清除头像');
+      }
+    }, 60);
+  }
+}
+
+// 用一个最小请求探活：能通就说明地址、密钥、模型名这三样没填错
+async function testProvider(p, btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '测试中…';
+  try {
+    if (!p.apiKey) throw new Error('还没填密钥');
+    if (!p.models || !p.models.length) throw new Error('还没填模型名');
+    const model = p.models[0];
+    const signal = AbortSignal.timeout(20000);
+    if (p.type === 'anthropic') {
+      const r = await fetch(p.baseUrl.replace(/\/$/, '') + '/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': p.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: '嗨' }] }),
+        signal,
+      });
+      if (!r.ok) throw new Error(await httpErr(r));
+    } else {
+      const r = await fetch(p.baseUrl.replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.apiKey },
+        body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: '嗨' }] }),
+        signal,
+      });
+      if (!r.ok) throw new Error(await httpErr(r));
+    }
+    S.provStatus[p.id] = { ok: true, at: Date.now(), msg: '' }; save();
+    toast('通了：' + p.name + ' / ' + model);
+  } catch (e) {
+    const msg = e.name === 'TimeoutError' ? '等了 20 秒没响应（地址不通或被墙）' : e.message;
+    S.provStatus[p.id] = { ok: false, at: Date.now(), msg: String(msg).slice(0, 120) }; save();
+    alert('没通：' + p.name + '\n\n' + msg + '\n\n常见原因：密钥错、地址少了 /v1、模型名不存在。');
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
 }
 
 function openMembers() {
@@ -1023,8 +1384,18 @@ function toast(msg) {
 // ── 事件绑定 ─────────────────────────────────────────────────
 function bind() {
   $('#btn-new').onclick = () => { newSession(active()?.mode || 'single'); render(); };
+  $('#btn-clear').onclick = () => {
+    if (!S.sessions.length) { toast('本来就没有会话'); return; }
+    if (!confirm(`清空全部 ${S.sessions.length} 个会话？聊天记录会一起删掉，不可恢复。`)) return;
+    const mode = active()?.mode || 'single';
+    S.sessions = []; S.activeId = null; save();
+    newSession(mode); render();
+    toast('已清空');
+  };
+  $('#sess-search').oninput = () => renderSessions();
   $('#btn-send').onclick = send;
-  $('#btn-settings').onclick = openSettings;
+  $('#btn-tpl').onclick = openTemplateModal;
+$('#btn-settings').onclick = openSettings;
   $('#btn-members').onclick = openMembers;
   $('#btn-plugins').onclick = openPlugins;
   $('#btn-panel').onclick = () => $('#panel').classList.toggle('hidden');
