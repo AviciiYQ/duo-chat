@@ -204,3 +204,9 @@ body{
 .pstat{flex:none;width:14px;text-align:center;font-size:12px;color:var(--muted)}
 .pstat.ok{color:#3fbf6f}
 .pstat.bad{color:var(--err)}
+
+/* 模型名单面板 */
+#model-chips .chip{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
+#model-chips .chip:hover{border-color:var(--acc)}
+#model-chips .chip.in{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 18%,transparent)}
+.prov .row button.list{padding:2px 6px}

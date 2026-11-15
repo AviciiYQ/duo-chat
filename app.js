@@ -677,7 +677,11 @@ async function httpErr(r, url) {
   try { body = await r.text(); } catch {}
   const where = url ? `（${url}）` : '';
   if (r.status === 404) {
-    return `HTTP 404 找不到接口${where} ${body.slice(0, 160)} ← 多半是「地址」写错了：只填到 /v1 为止，不要带 /chat/completions`;
+    const sniff = /not.?found|model|不存在|无此模型/i.test(body);
+    const guess = sniff
+      ? '← 两种可能：①这家没有「这个模型名」（点这一行的「模型」按钮，看它到底有哪些）；②地址不是这家的'
+      : '← 多半是「地址」写错了：只填到 /v1 为止，不要带 /chat/completions';
+    return `HTTP 404 找不到${where} ${body.slice(0, 160)} ${guess}`;
   }
   if (r.status === 401 || r.status === 403) {
     return `HTTP ${r.status} 密钥不对或没权限${where} ${body.slice(0, 160)}`;
@@ -1048,6 +1052,7 @@ function renderProviders() {
           <option value="anthropic" ${p.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
         </select>
         <button class="ava-btn">头像</button>
+        <button class="list" title="跟这家要一份模型名单（不改任何设置）">模型</button>
         <button class="test">测试</button>
         <button class="del">删除</button>
       </div>
@@ -1074,6 +1079,7 @@ function renderProviders() {
       save(); renderProviders();
     };
     d.querySelector('.test').onclick = (e) => testProvider(p, e.target);
+    d.querySelector('.list').onclick = (e) => listModels(p, e.target);
     d.querySelector('.ava-btn').onclick = () => pickAvatar(p);
     box.append(d);
   });
@@ -1204,6 +1210,63 @@ async function probeProvider(p) {
     const msg = e.name === 'TimeoutError' ? '等了 20 秒没响应（地址不通或被墙）' : e.message;
     return { ok: false, msg: String(msg).slice(0, 160), model };
   }
+}
+
+// 跟服务商要一份模型名单：专门用来治「这家到底有没有这个模型名」这类 404
+function modelsUrl(p) {
+  let base = String(p.baseUrl || '').trim().replace(/\/+$/, '');
+  base = base.replace(/\/(chat\/completions|completions|messages|responses|models)$/i, '');
+  try {
+    const u = new URL(base);
+    const path = u.pathname.replace(/\/+$/, '');
+    if (!path && V1_HOSTS.some((re) => re.test(u.hostname))) {
+      u.pathname = '/v1';
+      base = u.toString().replace(/\/+$/, '');
+    }
+  } catch {}
+  return base + '/models';
+}
+
+async function listModels(p, btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    if (!p.apiKey) throw new Error('还没填密钥，拿不到名单');
+    const url = modelsUrl(p);
+    const headers = p.type === 'anthropic'
+      ? { 'x-api-key': p.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
+      : { authorization: 'Bearer ' + p.apiKey };
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(await httpErr(r, url));
+    const j = await r.json();
+    const arr = Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : [];
+    const ids = arr.map((m) => (typeof m === 'string' ? m : m.id || m.name)).filter(Boolean).sort();
+    if (!ids.length) throw new Error('这家没返回任何模型名');
+    showModelPicker(p, ids);
+  } catch (e) {
+    alert('拿不到 ' + p.name + ' 的模型名单\n\n' + (e.message || e) +
+      '\n\n可能原因：地址不对（要填到 /v1 这一层）、密钥权限不够看模型列表、或这家不提供这个接口。');
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+function showModelPicker(p, ids) {
+  const cur = new Set(p.models || []);
+  const chips = ids.map((id) => `<button class="chip ${cur.has(id) ? 'in' : ''}" data-m="${esc(id)}">${esc(id)}</button>`).join('');
+  openModal(`可选模型 · ${p.name}（共 ${ids.length} 个）`,
+    `<p class="hint" style="margin-top:0">点一个就把它设成主模型；再点一下取消。当前：${esc((p.models || []).join(', ') || '空')}</p>
+     <div id="model-chips" style="display:flex;flex-wrap:wrap;gap:6px;max-height:50vh;overflow:auto">${chips}</div>`, () => {
+      document.querySelectorAll('#model-chips [data-m]').forEach((b) => {
+        b.onclick = () => {
+          const id = b.dataset.m;
+          if (cur.has(id)) { cur.delete(id); b.classList.remove('in'); }
+          else { cur.add(id); b.classList.add('in'); }
+          p.models = [...cur];
+          save(); renderProviders(); renderPanel(active());
+        };
+      });
+    });
 }
 
 async function testProvider(p, btn) {
