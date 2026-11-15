@@ -594,7 +594,8 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
   const t0 = performance.now();
 
   if (p.type === 'anthropic') {
-    const r = await fetch(p.baseUrl.replace(/\/$/, '') + '/v1/messages', {
+    const url = apiUrl(p, 'anthropic');
+    const r = await fetch(url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -612,7 +613,7 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
       }),
       signal: currentAC ? currentAC.signal : undefined,
     });
-    if (!r.ok) throw new Error(await httpErr(r));
+    if (!r.ok) throw new Error(await httpErr(r, url));
     return await readSSE(r, (obj) => {
       if (obj.type === 'content_block_delta' && obj.delta?.text) return obj.delta.text;
       return '';
@@ -630,7 +631,7 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
   };
   if (p.supportsEffort && effort && effort !== 'none') body.reasoning_effort = effort;
 
-  const r = await fetch(p.baseUrl.replace(/\/$/, '') + '/chat/completions', {
+  const r = await fetch(apiUrl(p, 'openai'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.apiKey },
     body: JSON.stringify(body),
@@ -639,16 +640,16 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
   if (!r.ok && r.status === 400 && body.stream_options) {
     // 有的国产接口不认 stream_options，去掉再来一次
     delete body.stream_options;
-    const r2 = await fetch(p.baseUrl.replace(/\/$/, '') + '/chat/completions', {
+    const r2 = await fetch(apiUrl(p, 'openai'), {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.apiKey },
       body: JSON.stringify(body),
       signal: currentAC ? currentAC.signal : undefined,
     });
-    if (!r2.ok) throw new Error(await httpErr(r2));
+    if (!r2.ok) throw new Error(await httpErr(r2, apiUrl(p, 'openai')));
     return finishStream(r2);
   }
-  if (!r.ok) throw new Error(await httpErr(r));
+  if (!r.ok) throw new Error(await httpErr(r, apiUrl(p, 'openai')));
 
   return finishStream(r);
 
@@ -671,10 +672,28 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
 
 function estimateTokens(str) { return Math.ceil(str.length / 2.2); }
 
-async function httpErr(r) {
+async function httpErr(r, url) {
   let body = '';
   try { body = await r.text(); } catch {}
-  return `HTTP ${r.status} ${body.slice(0, 200)}`;
+  const where = url ? `（${url}）` : '';
+  if (r.status === 404) {
+    return `HTTP 404 找不到接口${where} ${body.slice(0, 160)} ← 多半是「地址」写错了：只填到 /v1 为止，不要带 /chat/completions`;
+  }
+  if (r.status === 401 || r.status === 403) {
+    return `HTTP ${r.status} 密钥不对或没权限${where} ${body.slice(0, 160)}`;
+  }
+  return `HTTP ${r.status}${where} ${body.slice(0, 200)}`;
+}
+
+// 拼接口地址：容忍用户把完整路径也填进去（/chat/completions、/v1/messages、末尾斜杠）
+function apiUrl(p, kind) {
+  let base = String(p.baseUrl || '').trim().replace(/\/+$/, '');
+  base = base.replace(/\/(chat\/completions|completions|messages|responses)$/i, '');
+  if (kind === 'anthropic') {
+    if (/\/v1$/i.test(base)) base = base.replace(/\/v1$/i, '');
+    return base + '/v1/messages';
+  }
+  return base + '/chat/completions';
 }
 
 async function readSSE(resp, pick, t0, model, onUsage) {
@@ -870,7 +889,7 @@ async function runGroup(s, question) {
       holder.content = res.text; holder.cost = res.cost; holder.ms = res.ms;
       s.cost += res.cost; s.reqs += 1;
     } catch (e) {
-      holder.content = '（这个模型没答上来）' + e.message;
+      holder.content = `（${p?.name || ''}${p ? ' / ' : ''}${model} 没答上来）` + e.message;
       holder.err = true;
     }
     save(); render();
@@ -1138,7 +1157,8 @@ async function testProvider(p, btn) {
     const model = p.models[0];
     const signal = AbortSignal.timeout(20000);
     if (p.type === 'anthropic') {
-      const r = await fetch(p.baseUrl.replace(/\/$/, '') + '/v1/messages', {
+      const url = apiUrl(p, 'anthropic');
+      const r = await fetch(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -1149,15 +1169,16 @@ async function testProvider(p, btn) {
         body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: '嗨' }] }),
         signal,
       });
-      if (!r.ok) throw new Error(await httpErr(r));
+      if (!r.ok) throw new Error(await httpErr(r, url));
     } else {
-      const r = await fetch(p.baseUrl.replace(/\/$/, '') + '/chat/completions', {
+      const url = apiUrl(p, 'openai');
+      const r = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.apiKey },
         body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: '嗨' }] }),
         signal,
       });
-      if (!r.ok) throw new Error(await httpErr(r));
+      if (!r.ok) throw new Error(await httpErr(r, url));
     }
     S.provStatus[p.id] = { ok: true, at: Date.now(), msg: '' }; save();
     toast('通了：' + p.name + ' / ' + model);
