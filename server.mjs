@@ -23,6 +23,20 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
+  // 前端把失败现场 POST 到这里，写进 app-debug.log
+  if (req.method === 'POST' && req.url === '/__log') {
+    let raw = '';
+    req.on('data', (c) => { raw += c; if (raw.length > 8192) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const line = String(raw || '').replace(/\s+/g, ' ').slice(0, 1200) + '\n';
+        fs.appendFileSync(path.join(__dirname, 'app-debug.log'), line, 'utf8');
+        res.writeHead(204); res.end();
+      } catch { res.writeHead(500); res.end(); }
+    });
+    return;
+  }
+
   let urlPath;
   try {
     urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);

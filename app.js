@@ -84,7 +84,17 @@ function defaultState() {
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const st = Object.assign(defaultState(), JSON.parse(raw)); st.plugins = st.plugins || []; st.templates = st.templates || []; st.provStatus = st.provStatus || {}; return st; }
+    if (raw) {
+      const st = Object.assign(defaultState(), JSON.parse(raw));
+      st.plugins = st.plugins || []; st.templates = st.templates || []; st.provStatus = st.provStatus || {};
+      // 自愈：官方 OpenAI 型域名被误设成 anthropic，会导致打到不存在的 /v1/messages
+      let fixed = false;
+      (st.providers || []).forEach((p) => {
+        if (p && p.type === 'anthropic' && protocolOf(p) === 'openai') { p.type = 'openai'; fixed = true; }
+      });
+      if (fixed) { try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch {} }
+      return st;
+    }
   } catch (e) {
     console.warn('读本地数据失败', e);
   }
@@ -587,13 +597,25 @@ function priceOf(model) {
   return S.pricing[model] || S.pricing.default;
 }
 
+// 把失败现场写到本地 server.mjs 的 app-debug.log，方便事后看它到底打了哪个地址
+function reportDiag(kind, info) {
+  try {
+    fetch('/__log', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ at: new Date().toISOString(), kind, ...info }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
 async function callModel({ providerId, model, messages, effort, temp, maxTokens }, onDelta) {
   const p = providerById(providerId);
   if (!p) throw new Error('找不到这个提供商配置');
   if (!p.apiKey) throw new Error(p.name + ' 没有填密钥');
   const t0 = performance.now();
 
-  if (p.type === 'anthropic') {
+  if (protocolOf(p) === 'anthropic') {
     const url = apiUrl(p, 'anthropic');
     const r = await fetch(url, {
       method: 'POST',
@@ -613,7 +635,7 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
       }),
       signal: currentAC ? currentAC.signal : undefined,
     });
-    if (!r.ok) throw new Error(await httpErr(r, url));
+    if (!r.ok) { const m = await httpErr(r, url); reportDiag('call', { model, url, status: r.status, msg: m.slice(0, 300) }); throw new Error(m); }
     return await readSSE(r, (obj) => {
       if (obj.type === 'content_block_delta' && obj.delta?.text) return obj.delta.text;
       return '';
@@ -646,10 +668,10 @@ async function callModel({ providerId, model, messages, effort, temp, maxTokens 
       body: JSON.stringify(body),
       signal: currentAC ? currentAC.signal : undefined,
     });
-    if (!r2.ok) throw new Error(await httpErr(r2, apiUrl(p, 'openai')));
+    if (!r2.ok) { const m = await httpErr(r2, apiUrl(p, 'openai')); reportDiag('call', { model, url: apiUrl(p, 'openai'), status: r2.status, msg: m.slice(0, 300) }); throw new Error(m); }
     return finishStream(r2);
   }
-  if (!r.ok) throw new Error(await httpErr(r, apiUrl(p, 'openai')));
+  if (!r.ok) { const m = await httpErr(r, apiUrl(p, 'openai')); reportDiag('call', { model, url: apiUrl(p, 'openai'), status: r.status, msg: m.slice(0, 300) }); throw new Error(m); }
 
   return finishStream(r);
 
@@ -679,7 +701,7 @@ async function httpErr(r, url) {
   if (r.status === 404) {
     const sniff = /not.?found|model|不存在|无此模型/i.test(body);
     const guess = sniff
-      ? '← 两种可能：①这家没有「这个模型名」（点这一行的「模型」按钮，看它到底有哪些）；②地址不是这家的'
+      ? '← 三种可能：①这家没有「这个模型名」（点这一行的「模型」按钮，看它到底有哪些）；②地址不是这家的；③这一行的「类型」选错了（官方 DeepSeek/通义/智谱是 OpenAI 兼容，不是 Anthropic）'
       : '← 多半是「地址」写错了：只填到 /v1 为止，不要带 /chat/completions';
     return `HTTP 404 找不到${where} ${body.slice(0, 160)} ${guess}`;
   }
@@ -700,6 +722,25 @@ const V1_HOSTS = [
   /^api\.groq\.com$/i,
   /^(api\.)?anthropic\.com$/i,
 ];
+
+// 只支持 OpenAI 协议的官方域名：就算类型被填成 anthropic，也按 OpenAI 走，否则会打到不存在的 /v1/messages
+const OPENAI_ONLY_HOSTS = [
+  /^(api\.)?deepseek\.com$/i,
+  /^(api\.)?moonshot\.cn$/i,
+  /^dashscope\.aliyuncs\.com$/i,
+  /^open\.bigmodel\.cn$/i,
+  /^(api\.)?openai\.com$/i,
+  /^(api\.)?x\.ai$/i,
+  /^openrouter\.ai$/i,
+  /^api\.groq\.com$/i,
+];
+function protocolOf(p) {
+  try {
+    const host = new URL(String(p.baseUrl || '').trim()).hostname;
+    if (OPENAI_ONLY_HOSTS.some((re) => re.test(host))) return 'openai';
+  } catch {}
+  return p && p.type === 'anthropic' ? 'anthropic' : 'openai';
+}
 
 function apiUrl(p, kind) {
   let base = String(p.baseUrl || '').trim().replace(/\/+$/, '');
@@ -1066,7 +1107,7 @@ function renderProviders() {
         <input class="name" value="${esc(p.name)}" placeholder="名字">
         <select>
           <option value="openai" ${p.type === 'openai' ? 'selected' : ''}>OpenAI 兼容</option>
-          <option value="anthropic" ${p.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
+          <option value="anthropic" ${protocolOf(p) === 'anthropic' ? 'selected' : ''}>Anthropic</option>
         </select>
         <button class="ava-btn">头像</button>
         <button class="list" title="跟这家要一份模型名单（不改任何设置）">模型</button>
@@ -1198,7 +1239,7 @@ async function probeProvider(p) {
   const model = p.models[0];
   const signal = AbortSignal.timeout(20000);
   try {
-    if (p.type === 'anthropic') {
+    if (protocolOf(p) === 'anthropic') {
       const url = apiUrl(p, 'anthropic');
       const r = await fetch(url, {
         method: 'POST',
@@ -1250,7 +1291,7 @@ async function listModels(p, btn) {
   try {
     if (!p.apiKey) throw new Error('还没填密钥，拿不到名单');
     const url = modelsUrl(p);
-    const headers = p.type === 'anthropic'
+    const headers = protocolOf(p) === 'anthropic'
       ? { 'x-api-key': p.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
       : { authorization: 'Bearer ' + p.apiKey };
     const r = await fetch(url, { headers, signal: AbortSignal.timeout(20000) });
