@@ -26,7 +26,7 @@ node server.mjs
 
 点右上「参数」旁边的齿轮，或者首次打开时的「打开设置」：
 
-1. 选一个提供商（DeepSeek / 千问 / Kimi / GLM / OpenAI / Anthropic / Gemini / Groq / OpenRouter）
+1. 选一个提供商（DeepSeek / 千问 / Kimi / GLM / OpenAI / Anthropic / Gemini / Grok / Groq / OpenRouter）
 2. 点「加一个」，地址和模型名会自动填好
 3. 只剩填 API 密钥这一个框
 4. 点这一行的「测试」确认能通（填错会直接告诉你哪不对）
@@ -56,13 +56,17 @@ node server.mjs
 
 ## 头像
 
-每个模型默认用预设的 emoji + 品牌色。想换成真图（比如自己画的二次元形象）：
+代码支持八家主流模型的默认头像，放在 `avatars/`，按接口地址自动认：DeepSeek、Kimi、千问、GLM、Claude、GPT、Gemini、Grok。认不出来的提供商（比如自建中转）回落成 emoji + 品牌色，不会空着。
+
+**仓库里不带这些图**（作者自己的画，没放进去）。想要的话自己准备八张，按 `avatars/deepseek.jpg`、`avatars/kimi.jpg`、`avatars/qwen.jpg`、`avatars/glm.jpg`、`avatars/claude.jpg`、`avatars/gpt.jpg`、`avatars/gemini.jpg`、`avatars/grok.jpg` 命名，放进 `avatars/` 就自动生效；缺哪张哪家就用 emoji 顶上。
+
+想换成自己的图：
 
 1. 打开设置（右上 ⚙）
 2. 单个改：点某个提供商那一行的「头像」，选一张图
-3. 批量改：点「批量导入头像」，一次选多张，文件名里带 deepseek/qwen/kimi/glm/gpt/claude/gemini 会自动对应；对不上的会问你给谁
+3. 批量改：点「批量导入头像」，一次选多张，文件名里带 deepseek/qwen/kimi/glm/gpt/claude/gemini/grok 会自动对应；对不上的会问你给谁
 
-图会被压成 160×160 存在浏览器本地，**不会上传，也不占 token**。
+自己导入的图会被压成 160×160 存在浏览器本地；内置图是本地文件。**两者都不上传、不占 token。**
 
 ## 群聊模板
 
@@ -101,6 +105,7 @@ index.html    界面骨架
 styles.css    样式
 app.js        全部逻辑（对话、群聊、插件）
 server.mjs    本地静态服务器
+avatars/      八家模型的默认头像（256×256 jpg）
 ```
 
 零依赖，没有 npm 包，没有构建步骤，没有 CDN。

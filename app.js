@@ -17,8 +17,44 @@ const PRESETS = {
   gemini:    { name: 'Gemini',     emoji: '✦', color: '#4285f4', type: 'openai',    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], effort: [] },
   openrouter:{ name: 'OpenRouter', emoji: '🔀', color: '#5a5a5a', type: 'openai',    baseUrl: 'https://openrouter.ai/api/v1',                        models: ['deepseek/deepseek-chat'], effort: [] },
   groq:      { name: 'Groq',       emoji: '⚡', color: '#f55036', type: 'openai',    baseUrl: 'https://api.groq.com/openai/v1',                      models: ['llama-3.3-70b-versatile'], effort: [] },
+  grok:      { name: 'Grok',       emoji: '✕', color: '#1a1a1a', type: 'openai',    baseUrl: 'https://api.x.ai/v1',                                 models: ['grok-4', 'grok-3-mini'], effort: [] },
   custom:    { name: '自定义',      emoji: '◆', color: '#6b7280', type: 'openai',    baseUrl: 'https://',                                            models: [], effort: [] },
 };
+
+// 内置头像：按 baseUrl 认模型，图在 ./avatars/ 下（没有图就自动回落到 emoji）
+const PRESET_AVATARS = {
+  deepseek:  'avatars/deepseek.jpg',
+  qwen:      'avatars/qwen.jpg',
+  kimi:      'avatars/kimi.jpg',
+  glm:       'avatars/glm.jpg',
+  openai:    'avatars/gpt.jpg',
+  anthropic: 'avatars/claude.jpg',
+  gemini:    'avatars/gemini.jpg',
+  grok:      'avatars/grok.jpg',
+};
+
+const AVATAR_HINTS = [
+  [/api\.deepseek\.com|deepseek/i, 'deepseek'],
+  [/dashscope|aliyuncs|qwen|通义/i, 'qwen'],
+  [/moonshot|kimi/i, 'kimi'],
+  [/bigmodel|zhipu|glm|智谱/i, 'glm'],
+  [/api\.openai\.com|openai/i, 'openai'],
+  [/anthropic|claude/i, 'anthropic'],
+  [/generativelanguage|gemini/i, 'gemini'],
+  [/api\.x\.ai|\bxai\b|grok/i, 'grok'],
+];
+
+function avatarKeyOf(p) {
+  if (!p) return '';
+  const hay = String(p.baseUrl || '') + ' ' + String(p.name || '');
+  for (const [re, key] of AVATAR_HINTS) if (re.test(hay)) return key;
+  return '';
+}
+
+function presetAvatarUrl(p) {
+  const key = avatarKeyOf(p);
+  return key ? (PRESET_AVATARS[key] || '') : '';
+}
 
 // 粗估价格（¥ / 百万 token），仅供显示，不参与计费
 const PRICE = {
@@ -338,7 +374,7 @@ function providerOfMessage(m) {
 function avatarSpec(m) {
   if (m.role === 'user') return { emoji: '🙂', color: '#3a4250', name: '我' };
   const p = providerOfMessage(m);
-  if (p) return { img: p.avatar || '', emoji: p.emoji || guessEmoji(p.name), color: p.color || '#39414d', name: p.name };
+  if (p) return { img: p.avatar || presetAvatarUrl(p), emoji: p.emoji || guessEmoji(p.name), color: p.color || '#39414d', name: p.name };
   return { emoji: guessEmoji(m.model || m.who), color: '#39414d', name: m.who || '' };
 }
 
@@ -358,6 +394,11 @@ function avatarEl(m) {
     const img = document.createElement('img');
     img.src = spec.img;
     img.alt = spec.name || '';
+    // 图丢了（仓库里没带图、或被删了）就退回 emoji，别显示破图标
+    img.onerror = () => {
+      img.remove();
+      el.textContent = spec.emoji;
+    };
     el.append(img);
   } else {
     el.textContent = spec.emoji;
