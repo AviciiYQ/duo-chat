@@ -686,6 +686,17 @@ async function httpErr(r, url) {
 }
 
 // 拼接口地址：容忍用户把完整路径也填进去（/chat/completions、/v1/messages、末尾斜杠）
+// 官方域名少了 /v1 也自动补上；自建中转不猜，照原样拼
+const V1_HOSTS = [
+  /^(api\.)?deepseek\.com$/i,
+  /^(api\.)?moonshot\.cn$/i,
+  /^(api\.)?openai\.com$/i,
+  /^(api\.)?x\.ai$/i,
+  /^openrouter\.ai$/i,
+  /^api\.groq\.com$/i,
+  /^(api\.)?anthropic\.com$/i,
+];
+
 function apiUrl(p, kind) {
   let base = String(p.baseUrl || '').trim().replace(/\/+$/, '');
   base = base.replace(/\/(chat\/completions|completions|messages|responses)$/i, '');
@@ -693,6 +704,14 @@ function apiUrl(p, kind) {
     if (/\/v1$/i.test(base)) base = base.replace(/\/v1$/i, '');
     return base + '/v1/messages';
   }
+  try {
+    const u = new URL(base);
+    const path = u.pathname.replace(/\/+$/, '');
+    if (!path && V1_HOSTS.some((re) => re.test(u.hostname))) {
+      u.pathname = '/v1';
+      base = u.toString().replace(/\/+$/, '');
+    }
+  } catch {}
   return base + '/chat/completions';
 }
 
@@ -986,6 +1005,7 @@ function openSettings() {
       </select>
       <button class="btn" id="btn-add-prov">加一个</button>
       <button class="btn ghost" id="btn-bulk-ava" title="一次选多张图，按文件名自动对应；对不上的会问你">批量导入头像</button>
+      <button class="btn ghost" id="btn-checkall" title="把填了密钥的提供商挨个探活，一次看完哪家能用">一键体检</button>
     </div>
     <p class="hint" style="margin-top:14px">
       密钥只存在这台电脑的浏览器里（localStorage），不会上传。别在公共电脑上用，别把这个页面挂到公网上。
@@ -993,6 +1013,7 @@ function openSettings() {
   openModal('模型提供商', html, () => {
     renderProviders();
     $('#btn-bulk-ava').onclick = importAvatars;
+    $('#btn-checkall').onclick = (e) => checkAll(e.target);
     $('#btn-add-prov').onclick = () => {
       const k = $('#preset-sel').value;
       const p = PRESETS[k];
@@ -1148,14 +1169,12 @@ function pickAvatar(p) {
 }
 
 // 用一个最小请求探活：能通就说明地址、密钥、模型名这三样没填错
-async function testProvider(p, btn) {
-  const label = btn.textContent;
-  btn.disabled = true; btn.textContent = '测试中…';
+async function probeProvider(p) {
+  if (!p.apiKey) return { ok: false, msg: '还没填密钥', model: '' };
+  if (!p.models || !p.models.length) return { ok: false, msg: '还没填模型名', model: '' };
+  const model = p.models[0];
+  const signal = AbortSignal.timeout(20000);
   try {
-    if (!p.apiKey) throw new Error('还没填密钥');
-    if (!p.models || !p.models.length) throw new Error('还没填模型名');
-    const model = p.models[0];
-    const signal = AbortSignal.timeout(20000);
     if (p.type === 'anthropic') {
       const url = apiUrl(p, 'anthropic');
       const r = await fetch(url, {
@@ -1180,15 +1199,44 @@ async function testProvider(p, btn) {
       });
       if (!r.ok) throw new Error(await httpErr(r, url));
     }
-    S.provStatus[p.id] = { ok: true, at: Date.now(), msg: '' }; save();
-    toast('通了：' + p.name + ' / ' + model);
+    return { ok: true, msg: '', model };
   } catch (e) {
     const msg = e.name === 'TimeoutError' ? '等了 20 秒没响应（地址不通或被墙）' : e.message;
-    S.provStatus[p.id] = { ok: false, at: Date.now(), msg: String(msg).slice(0, 120) }; save();
-    alert('没通：' + p.name + '\n\n' + msg + '\n\n常见原因：密钥错、地址少了 /v1、模型名不存在。');
-  } finally {
-    btn.disabled = false; btn.textContent = label;
+    return { ok: false, msg: String(msg).slice(0, 160), model };
   }
+}
+
+async function testProvider(p, btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '测试中…';
+  const res = await probeProvider(p);
+  S.provStatus[p.id] = { ok: res.ok, at: Date.now(), msg: res.msg };
+  save();
+  if (res.ok) toast('通了：' + p.name + ' / ' + res.model);
+  else alert('没通：' + p.name + '\n\n' + res.msg + '\n\n常见原因：密钥错、地址少了 /v1、模型名不存在。');
+  btn.disabled = false; btn.textContent = label;
+  renderProviders();
+}
+
+// 一键体检：把填了密钥的提供商挨个探活，最后给一张结论清单
+async function checkAll(btn) {
+  const list = S.providers.filter((p) => p.apiKey);
+  if (!list.length) { alert('还没有填了密钥的提供商。'); return; }
+  const label = btn.textContent;
+  btn.disabled = true;
+  const rows = [];
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    btn.textContent = `体检中 ${i + 1}/${list.length}`;
+    const res = await probeProvider(p);
+    S.provStatus[p.id] = { ok: res.ok, at: Date.now(), msg: res.msg };
+    save(); renderProviders();
+    rows.push(`${res.ok ? '✅ 能用' : '❌ 不通'}  ${p.name}${res.model ? ' / ' + res.model : ''}${res.ok ? '' : '\n      ' + res.msg}`);
+  }
+  btn.disabled = false; btn.textContent = label;
+  const okCount = list.filter((p) => S.provStatus[p.id] && S.provStatus[p.id].ok).length;
+  alert(`体检完了：${okCount}/${list.length} 家能通\n\n` + rows.join('\n\n') +
+    (okCount === list.length ? '' : '\n\n不通的看上面的原因：401/403 是密钥，404 是地址，429 是额度，Failed to fetch 是网络。'));
 }
 
 function openMembers() {
