@@ -843,8 +843,23 @@ function historyFor(s, upto) {
   return msgs;
 }
 
+// 会话里的"席位"存的是 providerId::模型名。你事后在设置里改了名单/删了这个名字，
+// 老会话还锁着旧名字，会一直 404。这里把它拉回当前名单里的第一个，并就地改掉。
+function resolveMemberKey(s, key) {
+  const [pid, model] = String(key || '').split('::');
+  const p = providerById(pid);
+  if (!p || !(p.models || []).length) {
+    const first = p && p.models && p.models[0] ? pid + '::' + p.models[0] : allModelOptions()[0]?.key;
+    return first || key;
+  }
+  if (p.models.includes(model)) return key;
+  const fixed = pid + '::' + p.models[0];
+  toast(`${p.name}：'${model}' 已不在名单里，这次用 '${p.models[0]}'`);
+  return fixed;
+}
+
 async function runSingle(s, text) {
-  const key = s.members[0]?.key || allModelOptions()[0]?.key;
+  const key = resolveMemberKey(s, s.members[0]?.key) || s.members[0]?.key || allModelOptions()[0]?.key;
   if (!key) throw new Error('没有可用模型');
   const [providerId, model] = key.split('::');
   const p = providerById(providerId);
@@ -894,7 +909,9 @@ async function runGroup(s, question) {
 
   // 第 1 轮：各答各的（互相看不见）
   for (const m of members) {
-    const [providerId, model] = m.key.split('::');
+    const fixedKey = resolveMemberKey(s, m.key);
+    if (fixedKey && fixedKey !== m.key) m.key = fixedKey;
+    const [providerId, model] = (m.key || '').split('::');
     const p = providerById(providerId);
     const holder = { id: uid(), role: 'assistant', pid: providerId, who: p?.name || model, model, content: '', round: 1, cost: 0, ms: 0 };
     s.messages.push(holder);
